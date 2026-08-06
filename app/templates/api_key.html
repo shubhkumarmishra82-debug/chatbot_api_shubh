@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{{APP_NAME}} — Get API Key</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --card: #171a21;
+    --border: #2a2d36;
+    --text: #f4f4f6;
+    --muted: #9599a6;
+    --grad1: #6366F1;
+    --grad2: #8B5CF6;
+    --grad3: #EC4899;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 20px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 36px;
+    max-width: 460px;
+    width: 100%;
+    text-align: center;
+  }
+  h1 {
+    font-size: 24px;
+    background: linear-gradient(90deg, var(--grad1), var(--grad2), var(--grad3));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    margin-bottom: 6px;
+  }
+  p.sub { color: var(--muted); margin-top: 0; margin-bottom: 26px; font-size: 14px; }
+  button {
+    background: linear-gradient(90deg, var(--grad1), var(--grad3));
+    border: none;
+    color: white;
+    padding: 12px 24px;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    width: 100%;
+  }
+  button:hover { opacity: 0.9; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  #result { margin-top: 22px; display: none; }
+  .status-badge {
+    display: inline-block;
+    background: rgba(74, 222, 128, 0.12);
+    color: #4ade80;
+    border: 1px solid rgba(74, 222, 128, 0.3);
+    border-radius: 20px;
+    padding: 4px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 14px;
+  }
+  .key-box {
+    background: #0f1115;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    word-break: break-all;
+    color: var(--grad3);
+    text-align: left;
+    position: relative;
+  }
+  .copy-btn {
+    margin-top: 10px;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 400;
+    padding: 6px 12px;
+  }
+  #error { color: #f87171; font-size: 13px; margin-top: 12px; display: none; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>{{APP_NAME}}</h1>
+    <p class="sub">Generate your own API key to use {{APP_NAME}}'s chat endpoint.</p>
+
+    <button id="genBtn" onclick="generateKey()">Generate my API key</button>
+
+    <div id="result">
+      <div class="status-badge">● status: success</div>
+      <div class="key-box" id="keyBox"></div>
+      <button class="copy-btn" onclick="copyKey()">Copy key</button>
+    </div>
+
+    <div id="error"></div>
+  </div>
+
+<script>
+async function generateKey() {
+  const btn = document.getElementById('genBtn');
+  const errorBox = document.getElementById('error');
+  btn.disabled = true;
+  btn.textContent = 'Generating...';
+  errorBox.style.display = 'none';
+
+  try {
+    const res = await fetch('/api/generate-key', { method: 'POST' });
+    if (!res.ok) throw new Error('Request failed');
+    const data = await res.json();
+
+    document.getElementById('keyBox').textContent = data.api_key;
+    document.getElementById('result').style.display = 'block';
+    btn.textContent = 'Generate another key';
+    btn.disabled = false;
+  } catch (e) {
+    errorBox.textContent = 'Something went wrong — try again.';
+    errorBox.style.display = 'block';
+    btn.textContent = 'Generate my API key';
+    btn.disabled = false;
+  }
+}
+
+function copyKey() {
+  const key = document.getElementById('keyBox').textContent;
+  navigator.clipboard.writeText(key);
+  const btn = document.querySelector('.copy-btn');
+  btn.textContent = 'Copied!';
+  setTimeout(() => btn.textContent = 'Copy key', 1500);
+}
+</script>
+</body>
+</html>

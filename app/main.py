@@ -1,9 +1,24 @@
+import os
+import secrets
+
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from sqlalchemy.orm import Session
 
 from . import database, schemas, search, matcher, config
+
+TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
+
+
+def render_template(filename: str) -> str:
+    path = os.path.join(TEMPLATES_DIR, filename)
+    with open(path, "r", encoding="utf-8") as f:
+        html = f.read()
+    return (
+        html.replace("{{APP_NAME}}", config.APP_NAME)
+        .replace("{{CREATOR_NAME}}", config.CREATOR_NAME)
+    )
 
 app = FastAPI(title=config.APP_NAME)
 
@@ -36,6 +51,26 @@ def root():
         "status": "running",
         "docs": "/docs",
     }
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page():
+    return render_template("admin.html")
+
+
+@app.get("/api", response_class=HTMLResponse)
+def api_key_page():
+    return render_template("api_key.html")
+
+
+@app.post("/api/generate-key", response_model=schemas.ApiKeyOut)
+def generate_api_key(db: Session = Depends(database.get_db)):
+    new_key = "gms_" + secrets.token_urlsafe(24)
+    row = database.ApiKey(key=new_key)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return schemas.ApiKeyOut(api_key=row.key, status="success")
 
 
 @app.get("/health")

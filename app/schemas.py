@@ -57,6 +57,11 @@ class CustomReplyOut(BaseModel):
         from_attributes = True
 
 
+class ApiKeyOut(BaseModel):
+    api_key: str
+    status: str
+
+
 class MemoryNoteIn(BaseModel):
     note: str
 

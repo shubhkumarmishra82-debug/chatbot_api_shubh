@@ -81,6 +81,19 @@ class CustomReply(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class ApiKey(Base):
+    """
+    Self-serve API keys. Anyone visiting /api can generate one. Not
+    currently required to call /chat (so existing usage keeps working) --
+    hook up a dependency check on /chat if you want to start enforcing it.
+    """
+    __tablename__ = "api_keys"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    key = Column(String, unique=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class MemoryNote(Base):
     """
     'Trainer' notes — persistent facts or instructions you feed the bot

@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{{APP_NAME}} — Admin</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --card: #171a21;
+    --border: #2a2d36;
+    --text: #f4f4f6;
+    --muted: #9599a6;
+    --grad1: #6366F1;
+    --grad2: #8B5CF6;
+    --grad3: #EC4899;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 40px 20px;
+  }
+  .wrap { max-width: 640px; margin: 0 auto; }
+  h1 {
+    font-size: 28px;
+    background: linear-gradient(90deg, var(--grad1), var(--grad2), var(--grad3));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    margin-bottom: 4px;
+  }
+  p.sub { color: var(--muted); margin-top: 0; margin-bottom: 28px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  label { font-size: 13px; color: var(--muted); display: block; margin-bottom: 6px; }
+  input, textarea {
+    width: 100%;
+    background: #0f1115;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: var(--text);
+    font-size: 14px;
+    margin-bottom: 14px;
+    font-family: inherit;
+  }
+  textarea { resize: vertical; min-height: 60px; }
+  button {
+    background: linear-gradient(90deg, var(--grad1), var(--grad3));
+    border: none;
+    color: white;
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:hover { opacity: 0.9; }
+  button.danger {
+    background: transparent;
+    border: 1px solid #c0394d;
+    color: #f28b9c;
+    padding: 6px 12px;
+    font-weight: 400;
+    font-size: 12px;
+  }
+  .reply-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .reply-item:last-child { border-bottom: none; }
+  .reply-trigger { font-size: 12px; color: var(--grad3); margin-bottom: 4px; }
+  .reply-response { font-size: 14px; color: var(--text); }
+  #status { font-size: 13px; margin-top: 8px; min-height: 18px; }
+  .ok { color: #4ade80; }
+  .err { color: #f87171; }
+  .empty { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>{{APP_NAME}} Admin</h1>
+  <p class="sub">Add canned replies — no AI, no search, exact keyword matches.</p>
+
+  <div class="card">
+    <label>Trigger keywords (comma-separated)</label>
+    <input id="trigger" placeholder="hi,hello,hey" />
+    <label>Response</label>
+    <textarea id="response" placeholder="Hi! I'm {{APP_NAME}}, made by {{CREATOR_NAME}} 👋"></textarea>
+    <button onclick="addReply()">Add reply</button>
+    <div id="status"></div>
+  </div>
+
+  <div class="card">
+    <div id="list" class="empty">Loading...</div>
+  </div>
+</div>
+
+<script>
+async function loadReplies() {
+  const res = await fetch('/custom-replies');
+  const data = await res.json();
+  const list = document.getElementById('list');
+  if (!data.length) {
+    list.innerHTML = '<div class="empty">No custom replies yet — add one above.</div>';
+    return;
+  }
+  list.innerHTML = data.map(r => `
+    <div class="reply-item">
+      <div>
+        <div class="reply-trigger">${escapeHtml(r.trigger)}</div>
+        <div class="reply-response">${escapeHtml(r.response)}</div>
+      </div>
+      <button class="danger" onclick="deleteReply('${r.id}')">Delete</button>
+    </div>
+  `).join('');
+}
+
+async function addReply() {
+  const trigger = document.getElementById('trigger').value.trim();
+  const response = document.getElementById('response').value.trim();
+  const status = document.getElementById('status');
+  if (!trigger || !response) {
+    status.textContent = 'Both fields are required.';
+    status.className = 'err';
+    return;
+  }
+  const res = await fetch('/custom-replies', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ trigger, response })
+  });
+  if (res.ok) {
+    status.textContent = 'Added.';
+    status.className = 'ok';
+    document.getElementById('trigger').value = '';
+    document.getElementById('response').value = '';
+    loadReplies();
+  } else {
+    status.textContent = 'Failed to add reply.';
+    status.className = 'err';
+  }
+}
+
+async function deleteReply(id) {
+  await fetch(`/custom-replies/${id}`, { method: 'DELETE' });
+  loadReplies();
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+loadReplies();
+</script>
+</body>
+</html>
