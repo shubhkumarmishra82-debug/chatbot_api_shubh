@@ -94,6 +94,20 @@ class ApiKey(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class Document(Base):
+    """
+    Your own documents/notes -- the bot's private knowledge base. Split
+    into chunks so relevant pieces can be pulled in as context when
+    answering a question, without needing any external search or vendor.
+    """
+    __tablename__ = "documents"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    title = Column(String)
+    content = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class MemoryNote(Base):
     """
     'Trainer' notes — persistent facts or instructions you feed the bot

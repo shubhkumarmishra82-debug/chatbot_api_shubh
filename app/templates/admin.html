@@ -105,6 +105,22 @@
   <div class="card">
     <div id="list" class="empty">Loading...</div>
   </div>
+
+  <h1 style="margin-top:40px;">Your Documents</h1>
+  <p class="sub">Paste in your own notes/docs — the bot searches these first before anything else when answering questions.</p>
+
+  <div class="card">
+    <label>Title</label>
+    <input id="docTitle" placeholder="e.g. Refund Policy" />
+    <label>Content</label>
+    <textarea id="docContent" style="min-height: 140px;" placeholder="Paste the full text here..."></textarea>
+    <button onclick="addDocument()">Add document</button>
+    <div id="docStatus"></div>
+  </div>
+
+  <div class="card">
+    <div id="docList" class="empty">Loading...</div>
+  </div>
 </div>
 
 <script>
@@ -165,6 +181,58 @@ function escapeHtml(str) {
 }
 
 loadReplies();
+
+async function loadDocuments() {
+  const res = await fetch('/documents');
+  const data = await res.json();
+  const list = document.getElementById('docList');
+  if (!data.length) {
+    list.innerHTML = '<div class="empty">No documents yet — add one above.</div>';
+    return;
+  }
+  list.innerHTML = data.map(d => `
+    <div class="reply-item">
+      <div>
+        <div class="reply-trigger">${escapeHtml(d.title)}</div>
+        <div class="reply-response" style="color:var(--muted);font-size:12px;">Added ${new Date(d.created_at).toLocaleString()}</div>
+      </div>
+      <button class="danger" onclick="deleteDocument('${d.id}')">Delete</button>
+    </div>
+  `).join('');
+}
+
+async function addDocument() {
+  const title = document.getElementById('docTitle').value.trim();
+  const content = document.getElementById('docContent').value.trim();
+  const status = document.getElementById('docStatus');
+  if (!title || !content) {
+    status.textContent = 'Both fields are required.';
+    status.className = 'err';
+    return;
+  }
+  const res = await fetch('/documents', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, content })
+  });
+  if (res.ok) {
+    status.textContent = 'Added.';
+    status.className = 'ok';
+    document.getElementById('docTitle').value = '';
+    document.getElementById('docContent').value = '';
+    loadDocuments();
+  } else {
+    status.textContent = 'Failed to add document.';
+    status.className = 'err';
+  }
+}
+
+async function deleteDocument(id) {
+  await fetch(`/documents/${id}`, { method: 'DELETE' });
+  loadDocuments();
+}
+
+loadDocuments();
 </script>
 </body>
 </html>

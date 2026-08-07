@@ -119,15 +119,21 @@ async function generateKey() {
 
   try {
     const res = await fetch('/api/generate-key', { method: 'POST' });
-    if (!res.ok) throw new Error('Request failed');
-    const data = await res.json();
+    const raw = await res.text();
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      throw new Error('Server returned: ' + raw.slice(0, 300));
+    }
+    if (!res.ok) throw new Error(data.error || ('Request failed (status ' + res.status + ')'));
 
     document.getElementById('keyBox').textContent = data.api_key;
     document.getElementById('result').style.display = 'block';
     btn.textContent = 'Generate another key';
     btn.disabled = false;
   } catch (e) {
-    errorBox.textContent = 'Something went wrong — try again.';
+    errorBox.textContent = e.message || 'Something went wrong — try again.';
     errorBox.style.display = 'block';
     btn.textContent = 'Generate my API key';
     btn.disabled = false;

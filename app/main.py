@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from sqlalchemy.orm import Session
 
-from . import database, schemas, search, matcher, config
+from . import database, schemas, search, matcher, config, llm, retrieval
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
 
@@ -81,6 +81,7 @@ def health():
         "creator": config.CREATOR_NAME,
         "database_configured": database.engine is not None,
         "google_search_configured": bool(search.GOOGLE_API_KEY and search.GOOGLE_CSE_ID),
+        "ai_configured": bool(llm.OWN_SERVER_URL),
     }
 
 
@@ -114,23 +115,80 @@ async def chat(req: schemas.ChatRequest, db: Session = Depends(database.get_db))
     db.add(database.Message(conversation_id=conversation.id, role="user", content=req.message))
     db.commit()
 
-    # 1. Check your own custom replies first
+    sources_out = []
+
+    # 1. Check your own custom replies first -- fast, free, exact control
     custom_replies = db.query(database.CustomReply).all()
     custom_match = matcher.find_custom_reply(req.message, custom_replies)
 
-    sources_out = []
     if custom_match:
         reply_text = custom_match
         answer_type = "custom"
 
-    # 2. If it looks like a question, search Google and return results transparently
+    # 2. Nothing matched -- if a real AI key is configured, use it for a
+    #    genuine conversational reply (optionally grounded in a Google
+    #    search if the message looks like a question)
+    elif llm.OWN_SERVER_URL:
+        system_prompt = config.BOT_PERSONA
+        notes = db.query(database.MemoryNote).all()
+        if notes:
+            joined = "\n".join(f"- {n.note}" for n in notes)
+            system_prompt += f"\n\nAdditional instructions you must follow:\n{joined}"
+
+        # Your own documents take priority as grounding -- checked first
+        documents = db.query(database.Document).all()
+        doc_chunks = retrieval.top_chunks_for_query(req.message, documents) if documents else []
+        if doc_chunks:
+            lines = ["Relevant material from your own documents:"]
+            for c in doc_chunks:
+                lines.append(f"- ({c['title']}) {c['text']}")
+            system_prompt += "\n\n" + "\n".join(lines)
+
+        # Only fall back to a live web search if nothing in your own docs matched
+        if not doc_chunks and search.looks_like_question(req.message):
+            results = await search.google_search(req.message)
+            if results:
+                lines = [
+                    "Background info found via web search (facts only -- "
+                    "write your own original explanation in your own "
+                    "words, do not copy sentences from below):"
+                ]
+                for r in results:
+                    lines.append(f"- {r['title']}: {r['snippet']}")
+                system_prompt += "\n\n" + "\n".join(lines)
+                sources_out = [
+                    schemas.SourceOut(title=r["title"], link=r["link"]) for r in results
+                ]
+
+        history = [
+            {"role": m.role, "content": m.content}
+            for m in sorted(conversation.messages, key=lambda m: m.created_at)
+        ]
+        messages = [{"role": "system", "content": system_prompt}] + history
+
+        try:
+            reply_text = await llm.generate_reply(messages)
+            answer_type = "ai"
+        except Exception:
+            # AI call failed (rate limit, bad key, etc) -- degrade gracefully
+            # instead of crashing the whole request
+            if sources_out:
+                reply_text = search.format_search_reply(
+                    [{"title": s.title, "snippet": "", "link": s.link} for s in sources_out]
+                )
+                answer_type = "search"
+            else:
+                reply_text = FALLBACK_REPLY
+                answer_type = "fallback"
+
+    # 3. No AI key configured at all -- fall back to transparent search results
     elif search.looks_like_question(req.message):
         results = await search.google_search(req.message)
         reply_text = search.format_search_reply(results)
         sources_out = [schemas.SourceOut(title=r["title"], link=r["link"]) for r in results]
         answer_type = "search" if results else "fallback"
 
-    # 3. Otherwise, fallback
+    # 4. Nothing matched and it's not a question
     else:
         reply_text = FALLBACK_REPLY
         answer_type = "fallback"
@@ -181,6 +239,34 @@ def delete_conversation(conversation_id: str, db: Session = Depends(database.get
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
     db.delete(conversation)
+    db.commit()
+    return {"status": "deleted"}
+
+
+# ---------------------------------------------------------------------------
+# Your own documents (private knowledge base)
+# ---------------------------------------------------------------------------
+
+@app.post("/documents", response_model=schemas.DocumentOut)
+def add_document(doc: schemas.DocumentIn, db: Session = Depends(database.get_db)):
+    row = database.Document(title=doc.title, content=doc.content)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@app.get("/documents", response_model=list[schemas.DocumentOut])
+def list_documents(db: Session = Depends(database.get_db)):
+    return db.query(database.Document).order_by(database.Document.created_at.desc()).all()
+
+
+@app.delete("/documents/{doc_id}")
+def delete_document(doc_id: str, db: Session = Depends(database.get_db)):
+    row = db.query(database.Document).filter(database.Document.id == doc_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Document not found")
+    db.delete(row)
     db.commit()
     return {"status": "deleted"}
 

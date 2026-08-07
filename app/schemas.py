@@ -62,6 +62,20 @@ class ApiKeyOut(BaseModel):
     status: str
 
 
+class DocumentIn(BaseModel):
+    title: str
+    content: str
+
+
+class DocumentOut(BaseModel):
+    id: str
+    title: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class MemoryNoteIn(BaseModel):
     note: str
 
