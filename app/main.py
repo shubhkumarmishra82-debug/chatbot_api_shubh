@@ -53,6 +53,11 @@ def root():
     }
 
 
+@app.get("/chat-ui", response_class=HTMLResponse)
+def chat_ui_page():
+    return render_template("chat.html")
+
+
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page():
     return render_template("admin.html")
