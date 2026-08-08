@@ -6,34 +6,52 @@ Vercel Postgres automatically injects a POSTGRES_URL env var once you
 attach the integration in your project's Storage tab — nothing else to do.
 """
 import os
+import ssl
 from datetime import datetime
 import uuid
+from urllib.parse import urlsplit, urlunsplit
 
 from sqlalchemy import create_engine, Column, String, Text, DateTime, ForeignKey
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
 DATABASE_URL = os.getenv("POSTGRES_URL") or os.getenv("DATABASE_URL")
 
-# Vercel/Neon give a `postgres://` or `postgresql://` URL. We use the
-# pg8000 driver (pure Python, no C build step -- more reliable on
-# serverless) so the SQLAlchemy dialect must be `postgresql+pg8000://`.
+# Vercel/Neon give a `postgres://` or `postgresql://` URL, often with a
+# `?sslmode=require` query param. We use the pg8000 driver (pure Python,
+# no C build step -- more reliable on serverless), so the SQLAlchemy
+# dialect must be `postgresql+pg8000://`. pg8000 doesn't understand the
+# libpq-style `sslmode` query param the way psycopg2 does -- passing it
+# through crashes the connection at startup. So we strip any query string
+# and instead enable SSL explicitly via connect_args below.
+engine = None
+SessionLocal = None
+
 if DATABASE_URL:
     if DATABASE_URL.startswith("postgres://"):
         DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+pg8000://", 1)
     elif DATABASE_URL.startswith("postgresql://"):
         DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+pg8000://", 1)
 
-# IMPORTANT: don't raise/crash here at import time -- that takes down the
-# whole serverless function, even for routes that don't need the DB
-# (like /health). Instead, the engine is None until a real DB URL is set,
-# and get_db() below raises a clean, catchable error only when a route
-# actually tries to use the database.
-engine = (
-    create_engine(DATABASE_URL, pool_pre_ping=True, pool_size=3, max_overflow=2)
-    if DATABASE_URL
-    else None
-)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine) if engine else None
+    parts = urlsplit(DATABASE_URL)
+    clean_url = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+
+    ssl_context = ssl.create_default_context()
+    try:
+        engine = create_engine(
+            clean_url,
+            connect_args={"ssl_context": ssl_context},
+            pool_pre_ping=True,
+            pool_size=3,
+            max_overflow=2,
+        )
+        SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    except Exception:
+        # Don't let a bad connection string crash the whole app at import
+        # time -- engine stays None, get_db() below raises a clean error
+        # only when a route actually tries to use the database.
+        engine = None
+        SessionLocal = None
+
 Base = declarative_base()
 
 
@@ -125,7 +143,13 @@ class MemoryNote(Base):
 def init_db():
     if engine is None:
         return  # no DB configured yet -- skip silently, don't crash startup
-    Base.metadata.create_all(bind=engine)
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception:
+        # Don't crash the whole app if the DB is unreachable at cold
+        # start (wrong creds, network hiccup, etc). Routes that need the
+        # DB will surface a clean error when actually called instead.
+        pass
 
 
 def get_db():

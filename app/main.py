@@ -40,7 +40,10 @@ async def readable_error_handler(request: Request, exc: Exception):
 
 @app.on_event("startup")
 def on_startup():
-    database.init_db()  # no-op if no DB is configured yet -- won't crash
+    try:
+        database.init_db()
+    except Exception:
+        pass  # never let a startup hiccup crash the whole function
 
 
 @app.get("/")
