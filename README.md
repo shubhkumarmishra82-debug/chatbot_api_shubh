@@ -99,3 +99,7 @@ uvicorn app.main:app --reload --port 8000
   `StreamingResponse` if you want token-by-token output later.
 - **CORS is wide open** (`allow_origins=["*"]`) — restrict to your actual
   frontend domain before going live.
+
+
+
+lulu
