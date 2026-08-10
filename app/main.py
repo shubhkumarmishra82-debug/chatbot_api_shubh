@@ -56,6 +56,11 @@ def root():
     }
 
 
+@app.get("/ai", response_class=HTMLResponse)
+def ai_page():
+    return render_template("chat.html")
+
+
 @app.get("/chat-ui", response_class=HTMLResponse)
 def chat_ui_page():
     return render_template("chat.html")
@@ -152,8 +157,10 @@ async def chat(req: schemas.ChatRequest, db: Session = Depends(database.get_db))
                 lines.append(f"- ({c['title']}) {c['text']}")
             system_prompt += "\n\n" + "\n".join(lines)
 
-        # Only fall back to a live web search if nothing in your own docs matched
-        if not doc_chunks and search.looks_like_question(req.message):
+        # Only fall back to a live web search if nothing in your own docs
+        # matched -- unlimited search: every AI-routed message gets
+        # grounded, not just ones that look like a question
+        if not doc_chunks:
             results = await search.google_search(req.message)
             if results:
                 lines = [
