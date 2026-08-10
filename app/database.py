@@ -35,7 +35,14 @@ if DATABASE_URL:
     parts = urlsplit(DATABASE_URL)
     clean_url = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
 
+    # Match the semantics of the `sslmode=require` the URL originally
+    # asked for: connection is encrypted, but we don't demand full
+    # certificate-chain verification -- Vercel's Python runtime can't
+    # always verify Neon/Vercel Postgres's chain, and full "verify-full"
+    # was never what was requested in the first place.
     ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
     try:
         engine = create_engine(
             clean_url,
