@@ -129,3 +129,99 @@ Then any message containing "who made you" or "bye" hits these instantly — no 
 - Google Custom Search free tier: 100 queries/day.
 - Vercel Hobby plan function timeout: 10s (60s on Pro) — fine for search, since there's no AI generation step slowing things down.
 - CORS is currently open (`*`) — restrict to your actual frontend domain before going live.
+
+---
+
+## `/v1/chat/completions` — OpenAI-compatible endpoint
+
+This is the production-grade endpoint, built for real integrations (external apps, OpenAI client libraries pointed at your `base_url`, etc). It requires an API key.
+
+### Architecture
+
+```
+Request
+  │
+  ├─ 1. Calculator tool     (pure arithmetic, e.g. "12 * 7" -- answered instantly, no AI call)
+  ├─ 2. Custom replies       (your keyword-matched canned answers)
+  ├─ 3. Your documents        (RAG -- relevant chunks pulled in as context)
+  ├─ 4. Your own AI server    (if OWN_SERVER_URL is set), grounded with live search
+  ├─ 5. Live search results   (if no AI server configured)
+  └─ 6. Fallback message
+```
+
+No AI vendor key is used anywhere in this pipeline. Step 4 only activates if you've pointed `OWN_SERVER_URL` at a server you control.
+
+### Authentication
+
+```
+Authorization: Bearer <your_api_key>
+```
+Get a key at `/api`. Missing/invalid key → `401`. Over the rate limit → `429` (default 30 requests/minute per key, set via `RATE_LIMIT_PER_MINUTE` env var).
+
+### Request
+
+```bash
+curl https://your-project.vercel.app/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -d '{
+    "model": "gms-default",
+    "messages": [
+      {"role": "user", "content": "What is 15% of 240?"}
+    ]
+  }'
+```
+
+### Response (standard OpenAI shape + one extension field)
+
+```json
+{
+  "id": "chatcmpl-abc123...",
+  "object": "chat.completion",
+  "created": 1733500000,
+  "model": "gms-default",
+  "choices": [
+    {
+      "index": 0,
+      "message": { "role": "assistant", "content": "15% of 240 is 36." },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": { "prompt_tokens": 12, "completion_tokens": 8, "total_tokens": 20 },
+  "gms_answer_type": "ai"
+}
+```
+
+`gms_answer_type` tells you which layer answered: `calculator`, `custom`, `ai`, `search`, or `fallback`.
+
+### Extension fields (optional, beyond standard OpenAI)
+
+| Field | Default | Effect |
+|---|---|---|
+| `web_search` | auto | `true` forces a search, `false` disables it, omitted = auto-decide |
+| `use_documents` | `true` | whether to search your own document knowledge base |
+
+### Streaming
+
+Set `"stream": true` and you'll get Server-Sent Events in OpenAI's exact chunk format:
+```
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","choices":[{"delta":{"content":"Hello"},"index":0,"finish_reason":null}]}
+
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","choices":[{"delta":{},"index":0,"finish_reason":"stop"}]}
+
+data: [DONE]
+```
+This means official OpenAI client libraries (Python, JS, etc) work against this endpoint unmodified — just point `base_url` at `https://your-project.vercel.app/v1` and pass your own API key.
+
+### Honest limitations (so nothing surprises you later)
+
+- **Token counts are estimated** (chars ÷ 4), not exact — there's no tokenizer dependency bundled to keep the deploy lightweight.
+- **Caching is per-warm-instance, not distributed** — repeat identical requests are only cached if they hit the same warm serverless instance. Cold starts always recompute. For guaranteed cross-instance caching, an external store like Upstash Redis would be the next step.
+- **Rate limiting is DB-backed** (not in-memory) specifically because serverless functions don't share memory between invocations — this makes it accurate, but each check costs one extra DB round-trip.
+- **Retries** happen once per provider on failure, with a short backoff, before falling back to search/fallback.
+
+---
+
+## `/reseed`
+
+`POST /reseed` — adds any new entries from the code's built-in starter dataset (`app/seed_data.py`) that aren't already in your database, without touching anything you've customized. Useful after pulling a code update that expanded the seed list.

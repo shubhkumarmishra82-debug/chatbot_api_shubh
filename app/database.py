@@ -11,7 +11,7 @@ from datetime import datetime
 import uuid
 from urllib.parse import urlsplit, urlunsplit
 
-from sqlalchemy import create_engine, Column, String, Text, DateTime, ForeignKey
+from sqlalchemy import create_engine, Column, String, Text, DateTime, ForeignKey, Integer, Float
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
 DATABASE_URL = os.getenv("POSTGRES_URL") or os.getenv("DATABASE_URL")
@@ -108,15 +108,23 @@ class CustomReply(Base):
 
 class ApiKey(Base):
     """
-    Self-serve API keys. Anyone visiting /api can generate one. Not
-    currently required to call /chat (so existing usage keeps working) --
-    hook up a dependency check on /chat if you want to start enforcing it.
+    Self-serve API keys. Anyone visiting /api can generate one. Required
+    for /v1/chat/completions (the production-grade endpoint); /chat (the
+    simpler widget endpoint) stays open for convenience.
     """
     __tablename__ = "api_keys"
 
     id = Column(String, primary_key=True, default=generate_uuid)
     key = Column(String, unique=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    # rate limiting (sliding 60s window, tracked per key)
+    rate_limit_window_start = Column(Float, default=0.0)
+    rate_limit_count = Column(Integer, default=0)
+
+    # usage tracking
+    total_requests = Column(Integer, default=0)
+    total_tokens = Column(Integer, default=0)
 
 
 class Document(Base):

@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from sqlalchemy.orm import Session
 
-from . import database, schemas, search, matcher, config, llm, retrieval, seed_data
+from . import database, schemas, search, matcher, config, llm, retrieval, seed_data, v1
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
 
@@ -29,6 +29,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(v1.router)
 
 
 @app.exception_handler(Exception)
@@ -108,6 +110,7 @@ def health():
         "google_search_configured": bool(search.GOOGLE_API_KEY and search.GOOGLE_CSE_ID),
         "ai_configured": llm.is_configured(),
         "ai_provider": llm.active_provider(),
+        "v1_endpoint": "/v1/chat/completions (requires Authorization: Bearer <key>, get one at /api)",
     }
 
 

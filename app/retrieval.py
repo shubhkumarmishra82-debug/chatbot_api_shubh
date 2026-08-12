@@ -10,7 +10,16 @@ from typing import List
 
 
 def _tokenize(text: str) -> List[str]:
-    return re.findall(r"[a-z0-9']+", text.lower())
+    return [_stem(w) for w in re.findall(r"[a-z0-9']+", text.lower())]
+
+
+def _stem(word: str) -> str:
+    """Very lightweight suffix stripping so 'refund'/'refunds',
+    'running'/'run' etc overlap without needing a real NLP dependency."""
+    for suffix in ("ing", "ed", "es", "s"):
+        if len(word) > len(suffix) + 2 and word.endswith(suffix):
+            return word[: -len(suffix)]
+    return word
 
 
 def chunk_text(text: str, chunk_size: int = 220, overlap: int = 40) -> List[str]:
