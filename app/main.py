@@ -92,6 +92,12 @@ def generate_api_key(db: Session = Depends(database.get_db)):
     return schemas.ApiKeyOut(api_key=row.key, status="success")
 
 
+@app.post("/reseed")
+def reseed(db: Session = Depends(database.get_db)):
+    added = seed_data.add_missing_seed_replies(db, database)
+    return {"added": added}
+
+
 @app.get("/health")
 def health():
     return {
@@ -100,7 +106,8 @@ def health():
         "creator": config.CREATOR_NAME,
         "database_configured": database.engine is not None,
         "google_search_configured": bool(search.GOOGLE_API_KEY and search.GOOGLE_CSE_ID),
-        "ai_configured": bool(llm.OWN_SERVER_URL),
+        "ai_configured": llm.is_configured(),
+        "ai_provider": llm.active_provider(),
     }
 
 
@@ -147,7 +154,7 @@ async def chat(req: schemas.ChatRequest, db: Session = Depends(database.get_db))
     # 2. Nothing matched -- if a real AI key is configured, use it for a
     #    genuine conversational reply (optionally grounded in a Google
     #    search if the message looks like a question)
-    elif llm.OWN_SERVER_URL:
+    elif llm.is_configured():
         system_prompt = config.BOT_PERSONA
         notes = db.query(database.MemoryNote).all()
         if notes:
