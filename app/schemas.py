@@ -42,6 +42,26 @@ class ConversationDetail(ConversationOut):
     messages: list[MessageOut]
 
 
+class BulkCustomReply(BaseModel):
+    trigger: str
+    response: str
+
+
+class BulkDocument(BaseModel):
+    title: str
+    content: str
+
+
+class BulkImportIn(BaseModel):
+    custom_replies: list[BulkCustomReply] = []
+    documents: list[BulkDocument] = []
+
+
+class BulkImportOut(BaseModel):
+    custom_replies_added: int
+    documents_added: int
+
+
 class CustomReplyIn(BaseModel):
     trigger: str   # comma-separated keywords, e.g. "hi,hello,hey"
     response: str

@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from sqlalchemy.orm import Session
 
-from . import database, schemas, search, matcher, config, llm, retrieval
+from . import database, schemas, search, matcher, config, llm, retrieval, seed_data
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
 
@@ -42,6 +42,12 @@ async def readable_error_handler(request: Request, exc: Exception):
 def on_startup():
     try:
         database.init_db()
+        if database.SessionLocal is not None:
+            db = database.SessionLocal()
+            try:
+                seed_data.seed_if_empty(db, database)
+            finally:
+                db.close()
     except Exception:
         pass  # never let a startup hiccup crash the whole function
 
@@ -256,6 +262,23 @@ def delete_conversation(conversation_id: str, db: Session = Depends(database.get
     db.delete(conversation)
     db.commit()
     return {"status": "deleted"}
+
+
+# ---------------------------------------------------------------------------
+# Bulk import -- load many custom replies and/or documents in one request
+# ---------------------------------------------------------------------------
+
+@app.post("/bulk-import", response_model=schemas.BulkImportOut)
+def bulk_import(payload: schemas.BulkImportIn, db: Session = Depends(database.get_db)):
+    for r in payload.custom_replies:
+        db.add(database.CustomReply(trigger=r.trigger, response=r.response))
+    for d in payload.documents:
+        db.add(database.Document(title=d.title, content=d.content))
+    db.commit()
+    return schemas.BulkImportOut(
+        custom_replies_added=len(payload.custom_replies),
+        documents_added=len(payload.documents),
+    )
 
 
 # ---------------------------------------------------------------------------
