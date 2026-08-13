@@ -160,6 +160,8 @@ def init_db():
         return  # no DB configured yet -- skip silently, don't crash startup
     try:
         Base.metadata.create_all(bind=engine)
+        from . import migrations
+        migrations.run_migrations(engine)
     except Exception:
         # Don't crash the whole app if the DB is unreachable at cold
         # start (wrong creds, network hiccup, etc). Routes that need the

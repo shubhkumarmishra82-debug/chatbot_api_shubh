@@ -66,8 +66,10 @@ def _build_response(request_id: str, model: str, content: str,
     )
 
 
-async def _resolve_reply(req: ChatCompletionRequest, db: Session, request_id: str):
-    """Runs the full priority pipeline, returns (content, answer_type, sources)."""
+async def _resolve_reply(req: ChatCompletionRequest, db: Session, request_id: str, history: list = None):
+    """Runs the full priority pipeline, returns (content, answer_type, sources).
+    `history` is prior stored turns (if conversation_id was used), prepended
+    before the client's own messages."""
     last_user_msg = ""
     for m in reversed(req.messages):
         if m.role == "user":
@@ -114,6 +116,8 @@ async def _resolve_reply(req: ChatCompletionRequest, db: Session, request_id: st
                 sources = [{"title": r["title"], "link": r["link"]} for r in results]
 
         full_messages = [{"role": "system", "content": system_prompt}]
+        if history:
+            full_messages += history
         full_messages += [{"role": m.role, "content": m.content} for m in req.messages]
 
         cached = cache.get(full_messages, req.model)
@@ -144,6 +148,34 @@ async def _resolve_reply(req: ChatCompletionRequest, db: Session, request_id: st
     return FALLBACK_REPLY, "fallback", []
 
 
+def _load_conversation_history(db: Session, conversation_id: str) -> list:
+    """Loads prior turns for a conversation_id as plain role/content dicts."""
+    convo = db.query(database.Conversation).filter(database.Conversation.id == conversation_id).first()
+    if not convo:
+        return []
+    return [
+        {"role": m.role, "content": m.content}
+        for m in sorted(convo.messages, key=lambda m: m.created_at)
+    ]
+
+
+def _get_or_create_conversation(db: Session, conversation_id: str, title_hint: str) -> "database.Conversation":
+    convo = db.query(database.Conversation).filter(database.Conversation.id == conversation_id).first()
+    if convo:
+        return convo
+    convo = database.Conversation(id=conversation_id, title=title_hint[:40] or "New Conversation")
+    db.add(convo)
+    db.commit()
+    db.refresh(convo)
+    return convo
+
+
+def _persist_turn(db: Session, conversation_id: str, user_content: str, assistant_content: str):
+    db.add(database.Message(conversation_id=conversation_id, role="user", content=user_content))
+    db.add(database.Message(conversation_id=conversation_id, role="assistant", content=assistant_content))
+    db.commit()
+
+
 @router.post("/v1/chat/completions")
 async def chat_completions(
     req: ChatCompletionRequest,
@@ -160,26 +192,41 @@ async def chat_completions(
 
     log.info("[%s] key=%s stream=%s messages=%d", request_id, api_key_row.id, req.stream, len(req.messages))
 
+    conversation_id = req.conversation_id
+    history = []
+    if conversation_id:
+        _get_or_create_conversation(db, conversation_id, req.messages[-1].content if req.messages else "")
+        history = _load_conversation_history(db, conversation_id)
+
     if req.stream:
         return StreamingResponse(
-            _stream_response(req, db, request_id, api_key_row),
+            _stream_response(req, db, request_id, api_key_row, history, conversation_id),
             media_type="text/event-stream",
         )
 
-    content, answer_type, sources = await _resolve_reply(req, db, request_id)
+    content, answer_type, sources = await _resolve_reply(req, db, request_id, history=history)
 
-    prompt_tokens = sum(estimate_tokens(m.content) for m in req.messages)
+    if conversation_id:
+        last_user_msg = next((m.content for m in reversed(req.messages) if m.role == "user"), "")
+        _persist_turn(db, conversation_id, last_user_msg, content)
+
+    prompt_tokens = sum(estimate_tokens(m.content) for m in req.messages) + sum(
+        estimate_tokens(h["content"]) for h in history
+    )
     completion_tokens = estimate_tokens(content)
 
     api_key_row.total_requests = (api_key_row.total_requests or 0) + 1
     api_key_row.total_tokens = (api_key_row.total_tokens or 0) + prompt_tokens + completion_tokens
     db.commit()
 
-    return _build_response(request_id, req.model, content, prompt_tokens, completion_tokens, answer_type)
+    response = _build_response(request_id, req.model, content, prompt_tokens, completion_tokens, answer_type)
+    response.conversation_id = conversation_id
+    return response
 
 
 async def _stream_response(req: ChatCompletionRequest, db: Session, request_id: str,
-                            api_key_row: database.ApiKey):
+                            api_key_row: database.ApiKey, history: list = None,
+                            conversation_id: str = None):
     """
     SSE stream in OpenAI's chunk format. Note: only the AI-provider path
     streams token-by-token (since that's the only source that generates
@@ -213,13 +260,17 @@ async def _stream_response(req: ChatCompletionRequest, db: Session, request_id: 
         yield _chunk({"role": "assistant", "content": content})
         yield _chunk({}, finish_reason="stop")
         yield "data: [DONE]\n\n"
+        if conversation_id:
+            _persist_turn(db, conversation_id, last_user_msg, content)
         return
 
     if not ai_router.is_configured():
-        content, _, _ = await _resolve_reply(req, db, request_id)
+        content, _, _ = await _resolve_reply(req, db, request_id, history=history)
         yield _chunk({"role": "assistant", "content": content})
         yield _chunk({}, finish_reason="stop")
         yield "data: [DONE]\n\n"
+        if conversation_id:
+            _persist_turn(db, conversation_id, last_user_msg, content)
         return
 
     system_prompt = config.BOT_PERSONA
@@ -230,14 +281,21 @@ async def _stream_response(req: ChatCompletionRequest, db: Session, request_id: 
             f"- ({c['title']}) {c['text']}" for c in doc_chunks
         )
     full_messages = [{"role": "system", "content": system_prompt}]
+    if history:
+        full_messages += history
     full_messages += [{"role": m.role, "content": m.content} for m in req.messages]
 
     yield _chunk({"role": "assistant", "content": ""})
+    accumulated = ""
     try:
         async for piece in ai_router.chat_stream(full_messages, request_id=request_id):
+            accumulated += piece
             yield _chunk({"content": piece})
     except Exception as e:
         log.warning("[%s] stream failed: %s", request_id, e)
         yield _chunk({"content": f"\n\n[stream error: {e}]"})
     yield _chunk({}, finish_reason="stop")
     yield "data: [DONE]\n\n"
+
+    if conversation_id and accumulated:
+        _persist_turn(db, conversation_id, last_user_msg, accumulated)

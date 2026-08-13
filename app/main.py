@@ -33,10 +33,40 @@ app.add_middleware(
 app.include_router(v1.router)
 
 
+def _openai_error_type(status_code: int) -> str:
+    return {
+        400: "invalid_request_error",
+        401: "authentication_error",
+        404: "not_found_error",
+        429: "rate_limit_error",
+    }.get(status_code, "server_error")
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    if request.url.path.startswith("/v1/"):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": {
+                    "message": exc.detail,
+                    "type": _openai_error_type(exc.status_code),
+                    "code": exc.status_code,
+                }
+            },
+        )
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
 @app.exception_handler(Exception)
 async def readable_error_handler(request: Request, exc: Exception):
     # Turns any unhandled crash into a plain JSON message instead of
     # Vercel's generic "Serverless Function has crashed" page.
+    if request.url.path.startswith("/v1/"):
+        return JSONResponse(
+            status_code=500,
+            content={"error": {"message": str(exc), "type": "server_error", "code": 500}},
+        )
     return JSONResponse(status_code=500, content={"error": str(exc)})
 
 

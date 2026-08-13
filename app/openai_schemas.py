@@ -22,6 +22,7 @@ class ChatCompletionRequest(BaseModel):
     # Extensions beyond standard OpenAI fields:
     web_search: Optional[bool] = None       # None = auto-decide, True/False = force
     use_documents: Optional[bool] = True    # search your own document knowledge base
+    conversation_id: Optional[str] = None   # if set, server persists + recalls history
 
 
 class OAIChoice(BaseModel):
@@ -44,3 +45,4 @@ class ChatCompletionResponse(BaseModel):
     choices: List[OAIChoice]
     usage: OAIUsage
     gms_answer_type: str  # extension: "calculator" | "custom" | "ai" | "search" | "fallback"
+    conversation_id: Optional[str] = None  # extension: present if conversation_id was used

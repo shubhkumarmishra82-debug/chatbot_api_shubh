@@ -225,3 +225,30 @@ This means official OpenAI client libraries (Python, JS, etc) work against this 
 ## `/reseed`
 
 `POST /reseed` — adds any new entries from the code's built-in starter dataset (`app/seed_data.py`) that aren't already in your database, without touching anything you've customized. Useful after pulling a code update that expanded the seed list.
+
+---
+
+## Conversation memory in `/v1/chat/completions`
+
+Standard OpenAI usage is stateless (you resend the full `messages` array every call). This API also supports an optional extension for server-side memory:
+
+```json
+{
+  "messages": [{"role": "user", "content": "What's the capital of France?"}],
+  "conversation_id": "my-session-123"
+}
+```
+
+Pass any string as `conversation_id` (reuse the same one across calls). The server stores each turn and automatically prepends prior history before calling the AI, so you only need to send the newest message each time instead of the whole transcript. The same `conversation_id` comes back in the response. Omit it entirely to use the standard stateless OpenAI pattern instead.
+
+## Structured errors
+
+All `/v1/*` errors follow OpenAI's error shape:
+```json
+{ "error": { "message": "...", "type": "rate_limit_error", "code": 429 } }
+```
+`type` is one of `invalid_request_error`, `authentication_error`, `rate_limit_error`, `not_found_error`, `server_error`.
+
+## Database migrations
+
+`app/migrations.py` — a lightweight versioned migration runner (no Alembic dependency). Runs automatically on every cold start; each migration only applies once (tracked in a `schema_migrations` table). This matters because `create_all()` alone only creates missing *tables* — it never adds new *columns* to a table that already exists, which would otherwise cause "column does not exist" errors after a schema change to an existing model.
