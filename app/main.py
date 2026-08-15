@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from sqlalchemy.orm import Session
 
-from . import database, schemas, search, matcher, config, llm, retrieval, seed_data, v1
+from . import database, schemas, search, matcher, config, llm, retrieval, seed_data, v1, openai_schemas
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
 
@@ -174,85 +174,19 @@ async def chat(req: schemas.ChatRequest, db: Session = Depends(database.get_db))
     db.add(database.Message(conversation_id=conversation.id, role="user", content=req.message))
     db.commit()
 
-    sources_out = []
-
-    # 1. Check your own custom replies first -- fast, free, exact control
-    custom_replies = db.query(database.CustomReply).all()
-    custom_match = matcher.find_custom_reply(req.message, custom_replies)
-
-    if custom_match:
-        reply_text = custom_match
-        answer_type = "custom"
-
-    # 2. Nothing matched -- if a real AI key is configured, use it for a
-    #    genuine conversational reply (optionally grounded in a Google
-    #    search if the message looks like a question)
-    elif llm.is_configured():
-        system_prompt = config.BOT_PERSONA
-        notes = db.query(database.MemoryNote).all()
-        if notes:
-            joined = "\n".join(f"- {n.note}" for n in notes)
-            system_prompt += f"\n\nAdditional instructions you must follow:\n{joined}"
-
-        # Your own documents take priority as grounding -- checked first
-        documents = db.query(database.Document).all()
-        doc_chunks = retrieval.top_chunks_for_query(req.message, documents) if documents else []
-        if doc_chunks:
-            lines = ["Relevant material from your own documents:"]
-            for c in doc_chunks:
-                lines.append(f"- ({c['title']}) {c['text']}")
-            system_prompt += "\n\n" + "\n".join(lines)
-
-        # Only fall back to a live web search if nothing in your own docs
-        # matched -- unlimited search: every AI-routed message gets
-        # grounded, not just ones that look like a question
-        if not doc_chunks:
-            results = await search.google_search(req.message)
-            if results:
-                lines = [
-                    "Background info found via web search (facts only -- "
-                    "write your own original explanation in your own "
-                    "words, do not copy sentences from below):"
-                ]
-                for r in results:
-                    lines.append(f"- {r['title']}: {r['snippet']}")
-                system_prompt += "\n\n" + "\n".join(lines)
-                sources_out = [
-                    schemas.SourceOut(title=r["title"], link=r["link"]) for r in results
-                ]
-
-        history = [
-            {"role": m.role, "content": m.content}
-            for m in sorted(conversation.messages, key=lambda m: m.created_at)
-        ]
-        messages = [{"role": "system", "content": system_prompt}] + history
-
-        try:
-            reply_text = await llm.generate_reply(messages)
-            answer_type = "ai"
-        except Exception:
-            # AI call failed (rate limit, bad key, etc) -- degrade gracefully
-            # instead of crashing the whole request
-            if sources_out:
-                reply_text = search.format_search_reply(
-                    [{"title": s.title, "snippet": "", "link": s.link} for s in sources_out]
-                )
-                answer_type = "search"
-            else:
-                reply_text = FALLBACK_REPLY
-                answer_type = "fallback"
-
-    # 3. No AI key configured at all -- fall back to transparent search results
-    elif search.looks_like_question(req.message):
-        results = await search.google_search(req.message)
-        reply_text = search.format_search_reply(results)
-        sources_out = [schemas.SourceOut(title=r["title"], link=r["link"]) for r in results]
-        answer_type = "search" if results else "fallback"
-
-    # 4. Nothing matched and it's not a question
-    else:
-        reply_text = FALLBACK_REPLY
-        answer_type = "fallback"
+    # Delegate to the SAME resolution pipeline /v1/chat/completions uses
+    # (calculator -> custom replies -> documents -> AI -> search ->
+    # fallback), so there's exactly one place this logic lives instead of
+    # two copies that can drift out of sync with each other.
+    history_messages = [
+        openai_schemas.OAIMessage(role=m.role, content=m.content)
+        for m in sorted(conversation.messages, key=lambda m: m.created_at)
+    ]
+    fake_request = openai_schemas.ChatCompletionRequest(
+        messages=history_messages, use_documents=True, web_search=None
+    )
+    reply_text, answer_type, sources = await v1._resolve_reply(fake_request, db, request_id="widget")
+    sources_out = [schemas.SourceOut(title=s["title"], link=s["link"]) for s in sources]
 
     db.add(database.Message(conversation_id=conversation.id, role="assistant", content=reply_text))
     db.commit()

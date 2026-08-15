@@ -25,12 +25,20 @@ QUESTION_WORDS = [
     "is ", "are ", "can ", "does ", "do ", "define", "explain", "meaning of",
 ]
 
+REQUEST_PHRASES = [
+    "tell me", "please tell", "give me", "show me", "find me", "search for",
+    "i want to know", "let me know", "information about", "info about",
+    "details about", "list of", "recommend", "suggest", "describe",
+]
+
 PROBLEM_KEYWORDS = [
     "solve", "calculate", "derivative", "integral", "equation", "velocity",
     "acceleration", "force", "prove", "simplify", "factorize", "factorise",
     "theorem", "formula", "physics", "chemistry", "mathematics", "problem",
     "compute", "find x",
 ]
+
+MIN_WORDS_FOR_DEFAULT_SEARCH = 4
 
 
 def looks_like_question(message: str) -> bool:
@@ -40,9 +48,16 @@ def looks_like_question(message: str) -> bool:
         return True
     if any(stripped.startswith(w) for w in QUESTION_WORDS):
         return True
+    if any(phrase in stripped for phrase in REQUEST_PHRASES):
+        return True
     if any(kw in stripped for kw in PROBLEM_KEYWORDS):
         return True
     if re.search(r"\d+\s*[\+\-\*/=]\s*[\dx]", stripped):
+        return True
+    # Anything else reasonably substantive (a real sentence, not a stray
+    # word or filler) is still worth searching by default -- only truly
+    # short fragments fall through to the fallback message instead.
+    if len(stripped.split()) >= MIN_WORDS_FOR_DEFAULT_SEARCH:
         return True
     return False
 
