@@ -38,7 +38,7 @@ PROBLEM_KEYWORDS = [
     "compute", "find x",
 ]
 
-MIN_WORDS_FOR_DEFAULT_SEARCH = 4
+MIN_WORDS_FOR_DEFAULT_SEARCH = 3
 
 
 def looks_like_question(message: str) -> bool:
@@ -66,6 +66,11 @@ async def google_search(query: str, num: int = 3) -> list[dict]:
     if not (GOOGLE_API_KEY and GOOGLE_CSE_ID):
         return []
 
+    # Light cleanup -- collapse repeated punctuation ("is??" -> "is?")
+    # and trim, so slightly messy real-world phrasing doesn't confuse
+    # the search API.
+    query = re.sub(r"([?!.,])\1+", r"\1", query).strip()
+
     async with httpx.AsyncClient(timeout=15.0) as client:
         try:
             response = await client.get(
@@ -90,6 +95,55 @@ async def google_search(query: str, num: int = 3) -> list[dict]:
             }
             for item in data.get("items", [])[:num]
         ]
+
+
+async def duckduckgo_search(query: str, num: int = 3) -> list[dict]:
+    """
+    Zero-setup fallback -- no API key, no signup, no toggles. DuckDuckGo's
+    Instant Answer API is more limited than a full web search (best for
+    factual/definitional queries), but it's a genuine no-friction backup
+    when Google isn't configured right or returns nothing.
+    """
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        try:
+            response = await client.get(
+                "https://api.duckduckgo.com/",
+                params={"q": query, "format": "json", "no_html": 1, "skip_disambig": 1},
+            )
+            response.raise_for_status()
+        except httpx.HTTPError:
+            return []
+
+        data = response.json()
+        results = []
+
+        if data.get("AbstractText"):
+            results.append({
+                "title": data.get("Heading") or query,
+                "snippet": data["AbstractText"],
+                "link": data.get("AbstractURL", "https://duckduckgo.com"),
+            })
+
+        for topic in data.get("RelatedTopics", []):
+            if len(results) >= num:
+                break
+            if isinstance(topic, dict) and topic.get("Text"):
+                results.append({
+                    "title": topic.get("Text", "")[:60],
+                    "snippet": topic.get("Text", ""),
+                    "link": topic.get("FirstURL", "https://duckduckgo.com"),
+                })
+
+        return results[:num]
+
+
+async def web_search(query: str, num: int = 3) -> list[dict]:
+    """Tries Google first (if configured), falls back to DuckDuckGo
+    automatically if Google isn't configured or returns nothing."""
+    results = await google_search(query, num)
+    if results:
+        return results
+    return await duckduckgo_search(query, num)
 
 
 def format_search_reply(results: list[dict]) -> str:

@@ -108,7 +108,7 @@ async def _resolve_reply(req: ChatCompletionRequest, db: Session, request_id: st
 
         should_search = req.web_search if req.web_search is not None else not doc_chunks
         if should_search:
-            results = await search.google_search(last_user_msg)
+            results = await search.web_search(last_user_msg)
             if results:
                 system_prompt += "\n\nBackground info found via web search (facts only -- write your own original explanation, do not copy sentences):\n" + "\n".join(
                     f"- {r['title']}: {r['snippet']}" for r in results
@@ -140,7 +140,7 @@ async def _resolve_reply(req: ChatCompletionRequest, db: Session, request_id: st
 
     # No AI configured at all -- plain transparent search
     if req.web_search is not False and search.looks_like_question(last_user_msg):
-        results = await search.google_search(last_user_msg)
+        results = await search.web_search(last_user_msg)
         content = search.format_search_reply(results)
         sources = [{"title": r["title"], "link": r["link"]} for r in results]
         return content, ("search" if results else "fallback"), sources

@@ -94,6 +94,11 @@ def root():
     }
 
 
+@app.get("/code", response_class=HTMLResponse)
+def code_page():
+    return render_template("code.html")
+
+
 @app.get("/ai", response_class=HTMLResponse)
 def ai_page():
     return render_template("chat.html")

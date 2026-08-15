@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{{APP_NAME}} — Integrate</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --card: #171a21;
+    --border: #2a2d36;
+    --text: #f4f4f6;
+    --muted: #9599a6;
+    --grad1: #6366F1;
+    --grad2: #8B5CF6;
+    --grad3: #EC4899;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 40px 20px;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 {
+    font-size: 28px;
+    background: linear-gradient(90deg, var(--grad1), var(--grad2), var(--grad3));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    margin-bottom: 4px;
+  }
+  p.sub { color: var(--muted); margin-top: 0; margin-bottom: 28px; }
+  .tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0;
+  }
+  .tab {
+    padding: 10px 18px;
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 14px;
+    font-weight: 600;
+    border-bottom: 2px solid transparent;
+  }
+  .tab.active {
+    color: var(--text);
+    border-bottom: 2px solid var(--grad2);
+  }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .card h3 { margin-top: 0; font-size: 15px; }
+  .card p { color: var(--muted); font-size: 13px; line-height: 1.6; }
+  pre {
+    background: #0f1115;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    overflow-x: auto;
+    font-size: 12.5px;
+    line-height: 1.6;
+    position: relative;
+  }
+  code { font-family: 'Courier New', monospace; color: #d4d4e0; }
+  .copy-btn {
+    background: linear-gradient(90deg, var(--grad1), var(--grad3));
+    border: none;
+    color: white;
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 8px;
+  }
+  .copy-btn:hover { opacity: 0.9; }
+  .note {
+    font-size: 12px;
+    color: var(--grad3);
+    margin-top: 10px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Integrate {{APP_NAME}}</h1>
+  <p class="sub">Connect your website, Telegram bot, or Discord bot to your GMS API. Get your key at <a href="/api" style="color:#8B5CF6;">/api</a> first.</p>
+
+  <div class="tabs">
+    <div class="tab active" data-panel="website">Website</div>
+    <div class="tab" data-panel="telegram">Telegram Bot</div>
+    <div class="tab" data-panel="discord">Discord Bot</div>
+  </div>
+
+  <div id="website" class="panel active">
+    <div class="card">
+      <h3>Call the API from any website (JavaScript)</h3>
+      <p>Drop this into your site's JS. Replace YOUR_GMS_API_KEY with your real key from /api.</p>
+      <pre><code id="code-website">async function askGMS(message) {
+  const res = await fetch('https://chatbot-api-shubh.vercel.app/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer YOUR_GMS_API_KEY'
+    },
+    body: JSON.stringify({
+      messages: [{ role: 'user', content: message }],
+      conversation_id: 'visitor-123'   // optional: keeps memory per user
+    })
+  });
+  const data = await res.json();
+  return data.choices[0].message.content;
+}
+
+// usage:
+askGMS("hello").then(reply => console.log(reply));</code></pre>
+      <button class="copy-btn" onclick="copyCode('code-website')">Copy code</button>
+      <p class="note">Set conversation_id to something unique per visitor (e.g. a session ID) so the bot remembers context across their messages.</p>
+    </div>
+  </div>
+
+  <div id="telegram" class="panel">
+    <div class="card">
+      <h3>Telegram bot (Python)</h3>
+      <p>Requires: <code>pip install python-telegram-bot requests</code>. Get a bot token from <a href="https://t.me/BotFather" style="color:#8B5CF6;" target="_blank">@BotFather</a>.</p>
+      <pre><code id="code-telegram">import requests
+from telegram import Update
+from telegram.ext import Application, MessageHandler, ContextTypes, filters
+
+GMS_API_KEY = "YOUR_GMS_API_KEY"
+GMS_URL = "https://chatbot-api-shubh.vercel.app/v1/chat/completions"
+TELEGRAM_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_msg = update.message.text
+    chat_id = str(update.effective_chat.id)
+
+    resp = requests.post(
+        GMS_URL,
+        headers={"Authorization": f"Bearer {GMS_API_KEY}"},
+        json={
+            "messages": [{"role": "user", "content": user_msg}],
+            "conversation_id": f"telegram-{chat_id}"
+        },
+    )
+    reply = resp.json()["choices"][0]["message"]["content"]
+    await update.message.reply_text(reply)
+
+app = Application.builder().token(TELEGRAM_TOKEN).build()
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+app.run_polling()</code></pre>
+      <button class="copy-btn" onclick="copyCode('code-telegram')">Copy code</button>
+      <p class="note">Run this on any always-on machine (a small VPS, your PC, etc) with: python bot.py</p>
+    </div>
+  </div>
+
+  <div id="discord" class="panel">
+    <div class="card">
+      <h3>Discord bot (Python)</h3>
+      <p>Requires: <code>pip install discord.py requests</code>. Create a bot + get its token at <a href="https://discord.com/developers/applications" style="color:#8B5CF6;" target="_blank">discord.com/developers</a>.</p>
+      <pre><code id="code-discord">import discord
+import requests
+
+GMS_API_KEY = "YOUR_GMS_API_KEY"
+GMS_URL = "https://chatbot-api-shubh.vercel.app/v1/chat/completions"
+DISCORD_TOKEN = "YOUR_DISCORD_BOT_TOKEN"
+
+intents = discord.Intents.default()
+intents.message_content = True
+client = discord.Client(intents=intents)
+
+@client.event
+async def on_message(message):
+    if message.author == client.user:
+        return
+
+    resp = requests.post(
+        GMS_URL,
+        headers={"Authorization": f"Bearer {GMS_API_KEY}"},
+        json={
+            "messages": [{"role": "user", "content": message.content}],
+            "conversation_id": f"discord-{message.channel.id}"
+        },
+    )
+    reply = resp.json()["choices"][0]["message"]["content"]
+    await message.channel.send(reply)
+
+client.run(DISCORD_TOKEN)</code></pre>
+      <button class="copy-btn" onclick="copyCode('code-discord')">Copy code</button>
+      <p class="note">In the Discord Developer Portal, enable "Message Content Intent" under Bot settings, or on_message won't receive text.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById(tab.dataset.panel).classList.add('active');
+  });
+});
+
+function copyCode(id) {
+  const text = document.getElementById(id).innerText;
+  navigator.clipboard.writeText(text);
+  event.target.textContent = 'Copied!';
+  setTimeout(() => event.target.textContent = 'Copy code', 1500);
+}
+</script>
+</body>
+</html>
